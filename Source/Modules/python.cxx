@@ -2456,6 +2456,94 @@ public:
   }
 
   /* ------------------------------------------------------------
+   * argoutReturnTypeAnnotation()
+   *
+   * Gets the return type annotation for functions with argout
+   * parameters. Returns NULL if there are no argout parameters.
+   * The annotation mode must not be NONE.
+   * ------------------------------------------------------------ */
+
+  String *argoutReturnTypeAnnotation(Node *n, type_annotation_t anno) {
+    assert(anno != TYPE_ANNOTATION_NONE);
+
+    String *ret = NULL;
+    String *tm;
+
+    ParmList *p = Getattr(n, "wrap:parms");
+    if (!p)
+      p = Getattr(n, "parms");
+    ParmList *root = p;
+
+    while (p) {
+      if ((tm = Getattr(p, "tmap:argout:match_type"))) {
+        if (anno == TYPE_ANNOTATION_TYPING) {
+          // To allow multi-argument typemaps to specify an out parameter,
+          // we clone the list and attach the pytyping info.
+          p = CopyParmList(root);
+          break;
+        }
+
+        // C annotations - concatenate all with a comma
+        tm = SwigType_str(tm, 0);
+        if (ret) {
+          Printv(ret, ", ", tm, NULL);
+          Free(tm);
+        } else
+          ret = tm;
+
+        p = Getattr(p, "tmap:argout:next");
+      } else {
+        p = nextSibling(p);
+      }
+    }
+    if (!p)
+      return ret;
+
+    assert(anno == TYPE_ANNOTATION_TYPING);
+
+    Swig_typemap_attach_parms("pytyping", p, 0);
+
+    size_t n_ret = 0;
+    while (p != NULL) {
+      if (Getattr(p, "tmap:argout:match_type")) {
+        tm = lookupPytyping(p, true);
+        if (!tm)
+          Swig_warning(WARN_PYTHON_TYPEMAP_PYTYPING_UNDEF,
+                       input_file,
+                       line_number,
+                       "Missing required entry in pytyping typemap for %s\n",
+                       SwigType_str(Getattr(p, "tmap:argout:match_type"), 0));
+
+        if (ret) {
+          // Assume all argout parameters are returned in a tuple.
+          // While this might be incorrect, it does ensure that we emit a valid type.
+          // Concatenating all types by a comma alone is not valid.
+          if (n_ret == 1) {
+            String *tmp = NewStringf("typing.Tuple[%s, %s", ret, tm);
+            Free(ret);
+            ret = tmp;
+          } else
+            Printv(ret, ", ", tm, NULL);
+
+          Free(tm);
+        } else
+          ret = tm;
+
+        ++n_ret;
+
+        p = Getattr(p, "tmap:argout:next");
+      } else {
+        p = nextSibling(p);
+      }
+    }
+
+    if (n_ret > 1)
+      Printv(ret, "]", NULL);
+
+    return ret;
+  }
+
+  /* ------------------------------------------------------------
    * returnTypeAnnotation()
    *
    * Helper function for constructing the function annotation
@@ -2466,39 +2554,7 @@ public:
     if (anno == TYPE_ANNOTATION_NONE)
       return NewStringEmpty();
 
-    String *ret = 0;
-    Parm *p = Getattr(n, "parms");
-    String *tm;
-    /* Try to guess the returning type by argout typemap,
-     * however the result may not accurate. */
-    while (p) {
-      if ((tm = Getattr(p, "tmap:argout:match_type"))) {
-        switch (anno) {
-        case TYPE_ANNOTATION_C:
-          tm = SwigType_str(tm, 0);
-          break;
-        case TYPE_ANNOTATION_TYPING:
-          tm = lookupPytyping(p, true);
-          if (!tm)
-            Swig_warning(WARN_PYTHON_TYPEMAP_PYTYPING_UNDEF,
-                         input_file,
-                         line_number,
-                         "Missing required entry in pytyping typemap for %s\n",
-                         SwigType_str(Getattr(p, "tmap:argout:match_type"), 0));
-          break;
-        case TYPE_ANNOTATION_NONE:
-          break;  // unreachable
-        }
-
-        if (ret)
-          Printv(ret, ", ", tm, NULL);
-        else
-          ret = tm;
-        p = Getattr(p, "tmap:argout:next");
-      } else {
-        p = nextSibling(p);
-      }
-    }
+    String *ret = argoutReturnTypeAnnotation(n, anno);
     /* If no argout typemap, then get the returning type from
      * the function prototype. */
     if (!ret) {
