@@ -2339,7 +2339,7 @@ public:
    * Generate parameter list for Python functions or methods,
    * reuse make_autodocParmList() to do so.
    * ------------------------------------------------------------ */
-  String *make_pyParmList(Node *n, bool in_class, bool is_calling, int kw, bool has_self_for_count = false) {
+  String *make_pyParmList(Node *n, bool in_class, bool is_calling, int kw, bool has_self_for_count = false, bool ignore_overload = false) {
     /* Get the original function for a defaultargs copy,
      * see default_arguments() in parser.y. */
     Node *nn = Getattr(n, "defaultargs");
@@ -2360,8 +2360,8 @@ public:
         4. One of the default argument values can't be represented in Python.
         5. Varargs that haven't been forced to use a fixed number of arguments with %varargs.
      */
-    if (is_real_overloaded(n) || GetFlag(n, "feature:compactdefaultargs") || GetFlag(n, "feature:python:cdefaultargs") || !is_representable_as_pyargs(n) ||
-        varargs) {
+    if ((!ignore_overload && is_real_overloaded(n)) || GetFlag(n, "feature:compactdefaultargs") || GetFlag(n, "feature:python:cdefaultargs") ||
+        !is_representable_as_pyargs(n) || varargs) {
       String *parms = NewString("");
       if (in_class)
         Printf(parms, "self, ");
@@ -2384,6 +2384,38 @@ public:
     Printv(params, _params, NULL);
 
     return params;
+  }
+
+  /* ------------------------------------------------------------
+   * append_overload_declaration()
+   *
+   * Append an overload declaration to the shadow file. This is
+   * only supported if typing annotations are used, as it uses
+   * '@typing.overload'.
+   * ------------------------------------------------------------ */
+
+  void append_overload_declaration(File *dest, Node *n, const String *name, bool in_class, bool is_static) {
+    if (getTypeAnnotationMode(n) != TYPE_ANNOTATION_TYPING)
+      return;
+
+    String *parms = make_pyParmList(n, in_class, false, 0, false, true);
+    if (String *args = Strstr(parms, "*args")) {
+      int len = Len(parms);
+      // If the list ends with '*args', we can't create an overload declaration.
+      if (args == Char(parms) + len - 5) {
+        Delete(parms);
+        return;
+      }
+    }
+    const char *tab = (in_class || is_static) ? tab4 : "";
+    Printv(dest, "\n", tab, "@typing.overload\n", tab, NIL);
+    if (is_static)
+      Printv(dest, "@staticmethod\n", tab, NIL);
+
+    // Add '/' here to indicate that the previous arguments are positional.
+    // Otherwise, they could be key-value arguments, which isn't the case in the real function.
+    const char *close = Len(parms) == 0 ? ")" : ", /)";
+    Printv(dest, "def ", name, "(", parms, close, returnTypeAnnotation(n, true), ": ...", NIL);
   }
 
   /* ------------------------------------------------------------
@@ -2549,9 +2581,14 @@ public:
    * Helper function for constructing the function annotation
    * of the returning type, return a empty string for Python 2.x
    * ------------------------------------------------------------ */
-  String *returnTypeAnnotation(Node *n) {
+  String *returnTypeAnnotation(Node *n, bool ignore_overload = false) {
     type_annotation_t anno = getTypeAnnotationMode(n);
     if (anno == TYPE_ANNOTATION_NONE)
+      return NewStringEmpty();
+
+    // Don't print the return type for the real function if this is an overloaded one.
+    // The real function doesn't have a sym:nextSibling.
+    if (!ignore_overload && anno == TYPE_ANNOTATION_TYPING && is_real_overloaded(n))
       return NewStringEmpty();
 
     String *ret = argoutReturnTypeAnnotation(n, anno);
@@ -3650,6 +3687,9 @@ public:
       }
 
     } else {
+      if (!builtin && shadow && !(shadow & PYSHADOW_MEMBER) && use_static_method && is_real_overloaded(n)) {
+        append_overload_declaration(in_class ? f_shadow_stubs : f_shadow, n, Getattr(n, "sym:name"), in_class, false);
+      }
       if (!Getattr(n, "sym:nextSibling")) {
         dispatchFunction(n, linkage, funpack, builtin_self, builtin_ctor, director_class, use_static_method);
       }
@@ -5231,6 +5271,10 @@ public:
     if (builtin)
       Swig_restore(n);
 
+    if (is_real_overloaded(n) && shadow && !builtin && (!fastproxy || olddefs) && !Getattr(n, "feature:shadow")) {
+      append_overload_declaration(f_shadow, n, symname, true, false);
+    }
+
     if (!Getattr(n, "sym:nextSibling")) {
       if (shadow && !builtin) {
         int fproxy = fastproxy;
@@ -5337,6 +5381,10 @@ public:
       return SWIG_OK;
     }
 
+    if (is_real_overloaded(n) && shadow && !builtin && (!fastproxy || olddefs)) {
+      append_overload_declaration(f_shadow, n, symname, false, true);
+    }
+
     if (Getattr(n, "sym:nextSibling")) {
       return SWIG_OK;
     }
@@ -5411,95 +5459,98 @@ public:
 
     Swig_restore(n);
 
-    if (!Getattr(n, "sym:nextSibling")) {
-      if (shadow) {
-        int allow_kwargs = (check_kwargs(n) && (!Getattr(n, "sym:overloaded"))) ? 1 : 0;
-        int handled_as_init = 0;
-        if (!have_constructor) {
-          String *nname = Getattr(n, "sym:name");
-          String *sname = Getattr(getCurrentClass(), "sym:name");
-          String *cname = Swig_name_construct(NSPACE_TODO, sname);
-          handled_as_init = (Strcmp(nname, sname) == 0) || (Strcmp(nname, cname) == 0);
-          Delete(cname);
-        }
+    if (shadow) {
+      int allow_kwargs = (check_kwargs(n) && (!Getattr(n, "sym:overloaded"))) ? 1 : 0;
+      int handled_as_init = 0;
+      if (!have_constructor) {
+        String *nname = Getattr(n, "sym:name");
+        String *sname = Getattr(getCurrentClass(), "sym:name");
+        String *cname = Swig_name_construct(NSPACE_TODO, sname);
+        handled_as_init = (Strcmp(nname, sname) == 0) || (Strcmp(nname, cname) == 0);
+        Delete(cname);
+      }
 
-        String *subfunc = Swig_name_construct(NSPACE_TODO, symname);
-        if (!have_constructor && handled_as_init) {
-          if (!builtin) {
-            if (Getattr(n, "feature:shadow")) {
-              String *pycode = indent_pythoncode(Getattr(n, "feature:shadow"), tab4, Getfile(n), Getline(n), "%feature(\"shadow\")");
-              String *pyaction = NewStringf("%s.%s", module, subfunc);
-              Replaceall(pycode, "$action", pyaction);
-              Delete(pyaction);
-              Printv(f_shadow, pycode, "\n", NIL);
-              Delete(pycode);
-            } else {
-              String *pass_self = NewString("");
-              Node *parent = Swig_methodclass(n);
-              String *classname = Swig_class_name(parent);
-              String *rclassname = Swig_class_name(getCurrentClass());
-              assert(rclassname);
-              (void)rclassname;
+      if (is_real_overloaded(n) && !Getattr(n, "feature:shadow") && !builtin && !have_constructor && handled_as_init) {
+        append_overload_declaration(f_shadow, n, "__init__", true, false);
+      }
 
-              String *parms = make_pyParmList(n, true, false, allow_kwargs);
-              /* Pass 'self' only if using director */
-              String *callParms = make_pyParmList(n, false, true, allow_kwargs, true);
+      if (Getattr(n, "sym:nextSibling"))
+        return SWIG_OK;
 
-              if (use_director) {
-                Insert(callParms, 0, "_self, ");
-                Printv(pass_self, tab8, NIL);
-                Printf(pass_self, "if self.__class__ == %s:\n", classname);
-                Printv(pass_self, tab8, tab4, "_self = None\n", tab8, "else:\n", tab8, tab4, "_self = self\n", NIL);
-              }
+      String *subfunc = Swig_name_construct(NSPACE_TODO, symname);
+      if (!have_constructor && handled_as_init) {
+        if (!builtin) {
+          if (Getattr(n, "feature:shadow")) {
+            String *pycode = indent_pythoncode(Getattr(n, "feature:shadow"), tab4, Getfile(n), Getline(n), "%feature(\"shadow\")");
+            String *pyaction = NewStringf("%s.%s", module, subfunc);
+            Replaceall(pycode, "$action", pyaction);
+            Delete(pyaction);
+            Printv(f_shadow, pycode, "\n", NIL);
+            Delete(pycode);
+          } else {
+            String *pass_self = NewString("");
+            Node *parent = Swig_methodclass(n);
+            String *classname = Swig_class_name(parent);
+            String *rclassname = Swig_class_name(getCurrentClass());
+            assert(rclassname);
+            (void)rclassname;
 
-              Printv(f_shadow, "\n", tab4, "def __init__(", parms, ")", returnTypeAnnotation(n), ":\n", NIL);
-              if (Node *node_with_doc = find_overload_with_docstring(n))
-                Printv(f_shadow, tab8, docstring(node_with_doc, AUTODOC_CTOR, tab8), "\n", NIL);
-              if (have_pythonprepend(n))
-                Printv(f_shadow, indent_pythoncode(pythonprepend(n), tab8, Getfile(n), Getline(n), "%pythonprepend or %feature(\"pythonprepend\")"), "\n", NIL);
-              Printv(f_shadow, pass_self, NIL);
-              Printv(f_shadow, tab8, module, ".", class_name, "_swiginit(self, ", funcCall(subfunc, callParms), ")\n", NIL);
-              if (have_pythonappend(n))
-                Printv(f_shadow, indent_pythoncode(pythonappend(n), tab8, Getfile(n), Getline(n), "%pythonappend or %feature(\"pythonappend\")"), "\n\n", NIL);
-              Delete(pass_self);
+            String *parms = make_pyParmList(n, true, false, allow_kwargs);
+            /* Pass 'self' only if using director */
+            String *callParms = make_pyParmList(n, false, true, allow_kwargs, true);
+
+            if (use_director) {
+              Insert(callParms, 0, "_self, ");
+              Printv(pass_self, tab8, NIL);
+              Printf(pass_self, "if self.__class__ == %s:\n", classname);
+              Printv(pass_self, tab8, tab4, "_self = None\n", tab8, "else:\n", tab8, tab4, "_self = self\n", NIL);
             }
-            have_constructor = 1;
+
+            Printv(f_shadow, "\n", tab4, "def __init__(", parms, ")", returnTypeAnnotation(n), ":\n", NIL);
+            if (Node *node_with_doc = find_overload_with_docstring(n))
+              Printv(f_shadow, tab8, docstring(node_with_doc, AUTODOC_CTOR, tab8), "\n", NIL);
+            if (have_pythonprepend(n))
+              Printv(f_shadow, indent_pythoncode(pythonprepend(n), tab8, Getfile(n), Getline(n), "%pythonprepend or %feature(\"pythonprepend\")"), "\n", NIL);
+            Printv(f_shadow, pass_self, NIL);
+            Printv(f_shadow, tab8, module, ".", class_name, "_swiginit(self, ", funcCall(subfunc, callParms), ")\n", NIL);
+            if (have_pythonappend(n))
+              Printv(f_shadow, indent_pythoncode(pythonappend(n), tab8, Getfile(n), Getline(n), "%pythonappend or %feature(\"pythonappend\")"), "\n\n", NIL);
+            Delete(pass_self);
+          }
+          have_constructor = 1;
+        }
+      } else {
+        /* Hmmm. We seem to be creating a different constructor.  We're just going to create a
+           function for it. */
+        if (!builtin) {
+          if (Getattr(n, "feature:shadow")) {
+            String *pycode = indent_pythoncode(Getattr(n, "feature:shadow"), "", Getfile(n), Getline(n), "%feature(\"shadow\")");
+            String *pyaction = NewStringf("%s.%s", module, subfunc);
+            Replaceall(pycode, "$action", pyaction);
+            Delete(pyaction);
+            Printv(f_shadow_stubs, pycode, "\n", NIL);
+            Delete(pycode);
+          } else {
+            String *parms = make_pyParmList(n, false, false, allow_kwargs);
+            String *callParms = make_pyParmList(n, false, true, allow_kwargs);
+
+            Printv(f_shadow_stubs, "\ndef ", symname, "(", parms, ")", returnTypeAnnotation(n), ":\n", NIL);
+            if (Node *node_with_doc = find_overload_with_docstring(n))
+              Printv(f_shadow_stubs, tab4, docstring(node_with_doc, AUTODOC_CTOR, tab4), "\n", NIL);
+            if (have_pythonprepend(n))
+              Printv(
+                f_shadow_stubs, indent_pythoncode(pythonprepend(n), tab4, Getfile(n), Getline(n), "%pythonprepend or %feature(\"pythonprepend\")"), "\n", NIL);
+            Printv(f_shadow_stubs, tab4, "val = ", funcCall(subfunc, callParms), "\n", NIL);
+            if (have_pythonappend(n))
+              Printv(
+                f_shadow_stubs, indent_pythoncode(pythonappend(n), tab4, Getfile(n), Getline(n), "%pythonappend or %feature(\"pythonappend\")"), "\n", NIL);
+            Printv(f_shadow_stubs, tab4, "return val\n", NIL);
           }
         } else {
-          /* Hmmm. We seem to be creating a different constructor.  We're just going to create a
-             function for it. */
-          if (!builtin) {
-            if (Getattr(n, "feature:shadow")) {
-              String *pycode = indent_pythoncode(Getattr(n, "feature:shadow"), "", Getfile(n), Getline(n), "%feature(\"shadow\")");
-              String *pyaction = NewStringf("%s.%s", module, subfunc);
-              Replaceall(pycode, "$action", pyaction);
-              Delete(pyaction);
-              Printv(f_shadow_stubs, pycode, "\n", NIL);
-              Delete(pycode);
-            } else {
-              String *parms = make_pyParmList(n, false, false, allow_kwargs);
-              String *callParms = make_pyParmList(n, false, true, allow_kwargs);
-
-              Printv(f_shadow_stubs, "\ndef ", symname, "(", parms, ")", returnTypeAnnotation(n), ":\n", NIL);
-              if (Node *node_with_doc = find_overload_with_docstring(n))
-                Printv(f_shadow_stubs, tab4, docstring(node_with_doc, AUTODOC_CTOR, tab4), "\n", NIL);
-              if (have_pythonprepend(n))
-                Printv(f_shadow_stubs,
-                       indent_pythoncode(pythonprepend(n), tab4, Getfile(n), Getline(n), "%pythonprepend or %feature(\"pythonprepend\")"),
-                       "\n",
-                       NIL);
-              Printv(f_shadow_stubs, tab4, "val = ", funcCall(subfunc, callParms), "\n", NIL);
-              if (have_pythonappend(n))
-                Printv(
-                  f_shadow_stubs, indent_pythoncode(pythonappend(n), tab4, Getfile(n), Getline(n), "%pythonappend or %feature(\"pythonappend\")"), "\n", NIL);
-              Printv(f_shadow_stubs, tab4, "return val\n", NIL);
-            }
-          } else {
-            Printf(f_shadow_stubs, "%s = %s\n", symname, subfunc);
-          }
+          Printf(f_shadow_stubs, "%s = %s\n", symname, subfunc);
         }
-        Delete(subfunc);
       }
+      Delete(subfunc);
     }
     return SWIG_OK;
   }

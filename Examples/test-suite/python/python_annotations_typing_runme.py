@@ -2,8 +2,9 @@ import sys
 import inspect
 from swig_test_utils import swig_assert
 
-if sys.version_info[0:2] >= (3, 2):
+if sys.version_info[0:2] >= (3, 5):
     from python_annotations_typing import *
+    import typing
 
     # No __annotations__ support with -builtin or -fastproxy
     annotations_supported = not(is_python_builtin() or is_python_fastproxy())
@@ -28,6 +29,18 @@ if sys.version_info[0:2] >= (3, 2):
             raise RuntimeError("annotations mismatch: {}".format(anno))
         
         anno = get_annotations(global_overloaded)
+        if anno != {}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        overloads = list(typing.get_overloads(global_overloaded))
+        assert len(overloads) == 2, f"Expected 2 overloads, got {len(overloads)}"
+        anno = get_annotations(overloads[0])
+        if anno != {
+            "ri": "SWIGTYPE_p_int",
+            "return": "typing.Optional[SWIGTYPE_p_int]",
+        }:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+        anno = get_annotations(overloads[1])
         if anno != {"return": "typing.Optional[SWIGTYPE_p_int]"}:
             raise RuntimeError("annotations mismatch: {}".format(anno))
 
@@ -184,4 +197,66 @@ if sys.version_info[0:2] >= (3, 2):
 
         anno = get_annotations(make_struct_cref)
         if anno != {"return": "MyStruct"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(Overloader.__init__)
+        if anno != {}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        overloads = list(typing.get_overloads(Overloader.__init__))
+        assert len(overloads) == 3, f"Expected 3 overloads, got {len(overloads)}"
+        anno = get_annotations(overloads[0])
+        if anno != {}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+        anno = get_annotations(overloads[1])
+        if anno != {"arg2": "int"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+        anno = get_annotations(overloads[2])
+        if anno != {"arg2": "typing.Optional[SWIGTYPE_p_void]"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(Overloader.inside)
+        if anno != {}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        overloads = list(typing.get_overloads(Overloader.inside))
+        assert len(overloads) == 2, f"Expected 2 overloads, got {len(overloads)}"
+        anno = get_annotations(overloads[0])
+        if anno != {
+            "before": "int",
+            "argc": "typing.List[str]",
+            "foo": "int",
+            "bar": "int",
+            "return": "int",
+        }:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+        anno = get_annotations(overloads[1])
+        if anno != {"str": "typing.Optional[str]", "return": "bool"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        assert len(typing.get_overloads(Overloader.withDefaults1)) == 0
+        anno = get_annotations(Overloader.withDefaults1)
+        if anno != {"foo": "int", "bar": "int", "return": "None"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        assert len(typing.get_overloads(Overloader.withDefaults2)) == 0
+        anno = get_annotations(Overloader.withDefaults2)
+        if anno != {"return": "None"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(Overloader.staticOverload)
+        if anno != {}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        overloads = list(typing.get_overloads(Overloader.staticOverload))
+        assert len(overloads) == 2, f"Expected 2 overloads, got {len(overloads)}"
+        anno = get_annotations(overloads[0])
+        if anno != {"arg1": "int", "return": "None"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+        anno = get_annotations(overloads[1])
+        if anno != {
+            "arg1": "str",
+            "arg2": "typing.Optional[SWIGTYPE_p_int]",
+            "return": "bool",
+        }:
             raise RuntimeError("annotations mismatch: {}".format(anno))
