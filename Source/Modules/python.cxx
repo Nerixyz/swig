@@ -2545,37 +2545,58 @@ public:
     Swig_typemap_attach_parms("pytyping", p, 0);
 
     size_t n_ret = 0;
+    // Intialize with the return type by default.
+    // Users can overwrite this in the pytyping typemap by using argoutaction="overwrite".
+    if (!Equal(Getattr(n, "type"), "void")) {
+      ret = lookupPytyping(n, true);
+      n_ret = 1;
+    }
+
     while (p != NULL) {
       if (Getattr(p, "tmap:argout:match_type")) {
         tm = lookupPytyping(p, true);
-        if (!tm)
+        if (!tm) {
           Swig_warning(WARN_PYTHON_TYPEMAP_PYTYPING_UNDEF,
                        input_file,
                        line_number,
                        "Missing required entry in pytyping typemap for %s\n",
                        SwigType_str(Getattr(p, "tmap:argout:match_type"), 0));
+          tm = NewString("typing.Any");
+        }
 
-        if (ret) {
+        String *action = Getattr(p, "tmap:pytyping:argoutaction");
+        bool overwrite = Equal(action, "overwrite");
+
+        if (overwrite) {
+          n_ret = 0;  // incremented later
+          Delete(ret);
+          ret = tm;
+        } else if (ret) {
           // Assume all argout parameters are returned in a tuple.
           // While this might be incorrect, it does ensure that we emit a valid type.
           // Concatenating all types by a comma alone is not valid.
           if (n_ret == 1) {
             String *tmp = NewStringf("typing.Tuple[%s, %s", ret, tm);
-            Free(ret);
+            Delete(ret);
             ret = tmp;
-          } else
+          } else {
             Printv(ret, ", ", tm, NULL);
+          }
 
-          Free(tm);
-        } else
+          Delete(tm);
+        } else {
           ret = tm;
+        }
 
         ++n_ret;
 
-        p = Getattr(p, "tmap:argout:next");
-      } else {
-        p = nextSibling(p);
+        if (ParmList *next = Getattr(p, "tmap:argout:next")) {
+          p = next;
+          continue;
+        }
       }
+
+      p = nextSibling(p);
     }
 
     if (n_ret > 1)

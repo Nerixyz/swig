@@ -44,6 +44,10 @@ SWIGINTERNINLINE PyObject*
 %include <std/std_basic_string.i>
 %typemaps_asptrfromn(%checkcode(STRING), std::basic_string<char>);
 
+%typemap(pytyping) std::basic_string<char> *OUTPUT, std::basic_string<char> &OUTPUT "str"
+%typemap(pytyping) std::basic_string<char> * INPUT, std::basic_string<char> & INPUT "str"
+%typemap(pytyping) std::basic_string<char> * INOUT, std::basic_string<char> & INOUT "str"
+
 #endif
 
 
@@ -85,5 +89,9 @@ SWIGINTERNINLINE PyObject*
 }
 
 %typemaps_asptrfromn(%checkcode(UNISTRING), std::basic_string<wchar_t>);
+
+%typemap(pytyping) std::basic_string<wchar_t> *OUTPUT, std::basic_string<wchar_t> &OUTPUT "str"
+%typemap(pytyping) std::basic_string<wchar_t> * INPUT, std::basic_string<wchar_t> & INPUT "str"
+%typemap(pytyping) std::basic_string<wchar_t> * INOUT, std::basic_string<wchar_t> & INOUT "str"
 
 #endif

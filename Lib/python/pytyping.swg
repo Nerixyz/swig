@@ -10,7 +10,11 @@
 
 %typemap(pytyping) enum SWIGTYPE "int"
 
-%typemap(pytyping) bool "bool"
+%define %_pytyping_inout(Type, PyType)
+    %typemap(pytyping) Type *OUTPUT, Type &OUTPUT "PyType"
+    %typemap(pytyping) Type *INPUT, Type &INPUT "PyType"
+    %typemap(pytyping) Type *INOUT, Type &INOUT "PyType"
+%enddef
 
 /*
     Map both 'T' and 'T const &' to 'PyType'.
@@ -39,6 +43,26 @@
 
 %_pytyping_primtype(float , float);
 %_pytyping_primtype(double, float);
+
+%_pytyping_inout(bool              , bool);
+
+%_pytyping_inout(signed char       , int);
+%_pytyping_inout(unsigned char     , int);
+%_pytyping_inout(short             , int);
+%_pytyping_inout(unsigned short    , int);
+%_pytyping_inout(int               , int);
+%_pytyping_inout(unsigned int      , int);
+%_pytyping_inout(long              , int);
+%_pytyping_inout(unsigned long     , int);
+%_pytyping_inout(long long         , int);
+%_pytyping_inout(unsigned long long, int);
+%_pytyping_inout(size_t            , int);
+%_pytyping_inout(std::size_t       , int);
+%_pytyping_inout(ptrdiff_t         , int);
+%_pytyping_inout(std::ptrdiff_t    , int);
+
+%_pytyping_inout(float , float);
+%_pytyping_inout(double, float);
 
 %_pytyping_primtype(std::complex< float > , complex);
 %_pytyping_primtype(std::complex< double >, complex);

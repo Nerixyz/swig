@@ -281,15 +281,56 @@ if sys.version_info[0:2] >= (3, 5):
         if anno != {}:
             raise RuntimeError("annotations mismatch: {}".format(anno))
 
-        overloads = list(typing.get_overloads(Overloader.staticOverload))
-        assert len(overloads) == 2, f"Expected 2 overloads, got {len(overloads)}"
-        anno = get_annotations(overloads[0])
-        if anno != {"arg1": "int", "return": "None"}:
+        # get_overloads was added in Python 3.11
+        if hasattr(typing, "get_overloads"):
+            overloads = list(typing.get_overloads(Overloader.staticOverload))
+            swig_assert(
+                len(overloads) == 2,
+                "Expected 2 overloads, got {0}".format(len(overloads)),
+            )
+            anno = get_annotations(overloads[0])
+            if anno != {"arg1": "int", "return": "None"}:
+                raise RuntimeError("annotations mismatch: {}".format(anno))
+            anno = get_annotations(overloads[1])
+            if anno != {
+                "arg1": "str",
+                "arg2": "typing.Optional[SWIGTYPE_p_int]",
+                "return": "bool",
+            }:
+                raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(singleOutput)
+        if anno != {"x": "int", "y": "int", "return": "int"}:
             raise RuntimeError("annotations mismatch: {}".format(anno))
-        anno = get_annotations(overloads[1])
-        if anno != {
-            "arg1": "str",
-            "arg2": "typing.Optional[SWIGTYPE_p_int]",
-            "return": "bool",
-        }:
+
+        anno = get_annotations(singleOutputRet)
+        if anno != {"x": "int", "y": "int", "return": "typing.Tuple[bool, int]"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(singleOutputRetOverwrite)
+        if anno != {"x": "int", "y": "int", "return": "int"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(twoInputs)
+        if anno != {"in1": "int", "in2": "int", "return": "bool"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(outputTwo)
+        if anno != {"x": "int", "return": "typing.Tuple[int, int]"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(outputThree)
+        if anno != {"x": "int", "return": "typing.Tuple[int, int, int]"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(outputTwoRet)
+        if anno != {"x": "int", "return": "typing.Tuple[bool, int, int]"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(outputThreeRet)
+        if anno != {"x": "int", "return": "typing.Tuple[bool, int, int, int]"}:
+            raise RuntimeError("annotations mismatch: {}".format(anno))
+
+        anno = get_annotations(inout)
+        if anno != {"x": "int", "INOUT": "int", "return": "int"}:
             raise RuntimeError("annotations mismatch: {}".format(anno))
