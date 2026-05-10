@@ -10,7 +10,11 @@
 
 %typemap(pytyping) enum SWIGTYPE "int"
 
-%typemap(pytyping) bool "bool"
+%define %_pytyping_inout(Type, PyType)
+    %typemap(pytyping) Type *OUTPUT, Type &OUTPUT "PyType"
+    %typemap(pytyping) Type *INPUT, Type &INPUT "PyType"
+    %typemap(pytyping) Type *INOUT, Type &INOUT "PyType"
+%enddef
 
 /*
     Map both 'T' and 'T const &' to 'PyType'.
@@ -18,6 +22,7 @@
 */
 %define %_pytyping_primtype(Type, PyType)
     %typemap(pytyping) Type, Type const & "PyType"
+    %_pytyping_inout(Type, PyType)
 %enddef
 
 %_pytyping_primtype(bool, bool);

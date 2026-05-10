@@ -220,3 +220,28 @@ struct Overloader {
 };
 
 %}
+
+%apply int *OUTPUT { int *result1, int *result2, int *result3 };
+
+%apply int *OUTPUT { short *overwriteRet };
+%typemap(pytyping, argoutaction="overwrite") short *overwriteRet "int"
+
+%apply int *INPUT { short *in1, short *in2 };
+
+%inline %{
+
+void singleOutput(int x, int y, int *OUTPUT) {}
+bool singleOutputRet(int x, int y, int *OUTPUT) { return true; }
+
+bool singleOutputRetOverwrite(int x, int y, short *overwriteRet) { return true; }
+
+bool twoInputs(short *in1, short *in2) { return true; }
+
+void outputTwo(int x, int *result1, int *result2) {}
+void outputThree(int x, int *result1, int *result2, int *result3) {}
+bool outputTwoRet(int x, int *result1, int *result2) { return true; }
+bool outputThreeRet(int x, int *result1, int *result2, int *result3) { return true; }
+
+void inout(int x, int *INOUT) {}
+
+%}
