@@ -344,12 +344,6 @@ void intFunction(int myint1, int myint2) {}
 %}
 
 // Test $typemap(method:attribute?, typepattern) - optional typemap attribute fallback
-%inline %{
-struct IntAttrType { int val; };
-struct NoAttrType { float val; };
-struct OptionalAttrTest {};
-%}
-
 #if defined(SWIGCSHARP)
 %typemap(cstype, out="int") IntAttrType "IntAttrType"
 %typemap(cstype) NoAttrType "NoAttrType"
@@ -368,7 +362,13 @@ struct OptionalAttrTest {};
 %typemap(dtype, out="int") IntAttrType "IntAttrType"
 %typemap(dtype) NoAttrType "NoAttrType"
 %typemap(dcode) OptionalAttrTest %{
-  public const string OptionalAttrResult = "$typemap(dtype:out?, IntAttrType)";
-  public const string OptionalAttrFallback = "$typemap(dtype:out?, NoAttrType)";
+  static string OptionalAttrResult = "$typemap(dtype:out?, IntAttrType)";
+  static string OptionalAttrFallback = "$typemap(dtype:out?, NoAttrType)";
 %}
 #endif
+
+%inline %{
+struct IntAttrType { int val; };
+struct NoAttrType { float val; };
+struct OptionalAttrTest {};
+%}
